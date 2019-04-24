@@ -4,6 +4,7 @@ from random import choice, shuffle
 import serial
 from PIL import Image, ImageEnhance, ImageOps
 
+MAX_X = 140  # mm
 
 def split_layers(im, layer_count=5):
     light, dark = 0, 255
@@ -48,9 +49,15 @@ def split_layers(im, layer_count=5):
 
 class MazeEffect:
 
-    def __init__(self, pixmap, output=None, output_color=0, no_print=False):
+    def __init__(self, pixmap, pix_size=1.3, output=None, output_color=0, no_print=False):
         self.pixmap = pixmap[:]
         self.size = (len(pixmap[0]), len(pixmap))
+        self.pix_size = pix_size
+        if (self.pix_size * self.size[0]) > MAX_X:
+            raise Exception(
+                f"Size exceeds table size. For pix size "
+                f"{self.pix_size} you max image X is {MAX_X / self.pix_size} pixels"
+            )
         self.output = output or Image.new("L", (self.size[0] * 5, self.size[1] * 5), color=255)
         self.output_color = output_color
         self.cursor = (0, 0)
@@ -60,8 +67,12 @@ class MazeEffect:
             self.ser = serial.Serial("/dev/tty.usbmodemFA131", 57600, timeout=1)
         self.command_queue = []
         self.serial_started = False
+        self.set_pix_size()
 
-    def send_command(self, command):
+    def set_pix_size(self):
+        self.send_command("s{}".format(self.pix_size), flush=True)
+
+    def send_command(self, command, flush=False):
         if self.ser and not self.serial_started:
             r = self.ser.readline()
             while not r == b'started\r\n':
@@ -71,11 +82,13 @@ class MazeEffect:
             return
 
         self.command_queue.append(command)
-        if len(self.command_queue) >= 100:
-            self.command_queue.append("t;")
+        if len(self.command_queue) >= 100 or flush:
+            self.command_queue.append("t")
             payload = ";".join(self.command_queue)
-            payload = "{}\r\n".format(payload)
+            payload = "{};\r\n".format(payload)
+            print(payload)
             self.ser.write(bytes(payload.encode()))
+            sleep(3)
             r = self.ser.readline()
             while not r == b'ready\r\n':
                 r = self.ser.readline()
@@ -146,10 +159,10 @@ class MazeEffect:
                 pass
         return ads
 
-    def move_to(self, pos):
+    def move_to(self, pos, terminate=False):
         self.cursor = pos
         print(self.cursor)
-        self.send_command("g{},{}".format(*pos))
+        self.send_command("g{},{}".format(*pos), flush=terminate)
         # if self.ser:
         #     self.ser.write(bytes("g{},{}\n".format(*pos).encode()))
         #     r = self.ser.readline()
@@ -223,6 +236,63 @@ class MazeEffect:
             #         r = self.ser.readline()
             self.pen = "up"
 
+    def test_page(self):
+        def sequence():
+            self.pen_down()
+            # direita
+            self.draw_to((self.cursor[0] + 1, self.cursor[1]))
+            # baixo
+            self.draw_to((self.cursor[0], self.cursor[1] + 1))
+            # direita
+            self.draw_to((self.cursor[0] + 1, self.cursor[1]))
+            # cima
+            self.draw_to((self.cursor[0], self.cursor[1] - 1))
+            # direita
+            self.draw_to((self.cursor[0] + 1, self.cursor[1]))
+            # baixo
+            self.draw_to((self.cursor[0], self.cursor[1] + 1))
+            # baixo
+            self.draw_to((self.cursor[0], self.cursor[1] + 1))
+            # esquerda
+            self.draw_to((self.cursor[0] - 1, self.cursor[1]))
+            # baixo
+            self.draw_to((self.cursor[0], self.cursor[1] + 1))
+            # esquerda
+            self.draw_to((self.cursor[0] - 1, self.cursor[1]))
+            # cima
+            self.draw_to((self.cursor[0], self.cursor[1] - 1))
+            # esquerda
+            self.draw_to((self.cursor[0] - 1, self.cursor[1]))
+            # baixo
+            self.draw_to((self.cursor[0], self.cursor[1] + 1))
+            # baixo
+            self.draw_to((self.cursor[0], self.cursor[1] + 1))
+            self.pen_up()
+
+        self.move_to((0, 0))
+        self.pen_down()
+
+        for _ in range(10):
+            sequence()
+
+        self.move_to((4, 0))
+        for _ in range(10):
+            sequence()
+
+        self.move_to((8, 0))
+        for _ in range(10):
+            sequence()
+
+        self.move_to((12, 0))
+        for _ in range(10):
+            sequence()
+
+        self.move_to((16, 0))
+        for _ in range(10):
+            sequence()
+        self.move_to((0, 0), terminate=True)
+
+
     def process(self):
         self.move_to((0, 0))
         pix = self.find_pix()
@@ -240,7 +310,7 @@ class MazeEffect:
             pix = self.find_pix()
         self.output.show()
         self.pen_up()
-        self.move_to((0, 0))
+        self.move_to((0, 0), terminate=True)
         return self.output
 
 class DotEffect:
@@ -269,6 +339,11 @@ class DotEffect:
 
 
 def run():
+    me = MazeEffect([[0 for x in range(25)] for y in range(45)], pix_size=1.5, no_print=False)
+    me.test_page()
+    me.output.show()
+    return
+
     image = Image.open("img.jpg")
     image = image.convert("L")
     # image = ImageOps.invert(image)
@@ -280,7 +355,7 @@ def run():
         output_color = int(index * (255 / len(layers)))
         if input() == "s":
             continue
-        me = MazeEffect(pmap, output=output, output_color=output_color, no_print=False)
+        me = MazeEffect(pmap, pix_size=0.95, output=output, output_color=output_color, no_print=False)
         output = me.process()
     # layers = split_layers(image, 3)
     # de = DotEffect(layers)
