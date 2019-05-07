@@ -1,6 +1,8 @@
+//#include <SPI.h>
+//#include <SD.h>
 #include <Stepper.h>
 #include <Servo.h>
-#include <math.h>
+//#include <math.h>
 
 #define STEPS_PER_MOTOR_REVOLUTION 32
 
@@ -8,6 +10,10 @@ Stepper stepper_y(STEPS_PER_MOTOR_REVOLUTION, 8, 2, 9, 7);
 //Stepper stepper_y(STEPS_PER_MOTOR_REVOLUTION, 8, 10, 9, 11);
 Stepper stepper_x(STEPS_PER_MOTOR_REVOLUTION, 4, 5, 3, 6);
 Servo servo_z;
+
+const int chipSelect = 10;
+const int switch_x = A2;
+const int switch_y = A1;
 
 float mm_per_step = 0.0194;
 //float steps_per_mm = 1.0 / mm_per_step;
@@ -34,13 +40,37 @@ int next_index = 0;
 void setup() {
   stepper_y.setSpeed(1000);
   stepper_x.setSpeed(1000);
-  servo_z.attach(12);
+  servo_z.attach(14);
 
   Serial.begin(57600);
   while (!Serial) {}
   Serial.println("started");
   servo_z.write(180);
   delay(5000);
+//  Serial.print("Initializing SD card...");
+
+//  // see if the card is present and can be initialized:
+//  if (!SD.begin(chipSelect)) {
+//    Serial.println("Card failed, or not present");
+//    // don't do anything more:
+//    while (1);
+//  }
+//  Serial.println("card initialized.");
+//  File dataFile = SD.open("plot.cmd");
+  go_home();
+}
+
+void go_home() {
+  while (analogRead(switch_x) > 500) {
+    goto_xy(pos_x -1, pos_y);
+  }
+  goto_xy(pos_x + 150, pos_y);
+  pos_x = 0.0;
+  while (analogRead(switch_y) > 500) {
+    goto_xy(pos_x, pos_y - 1);
+  }
+  goto_xy(pos_x, pos_y + 150);
+  pos_y = 0.0;
 }
 
 void reset() {
@@ -87,10 +117,10 @@ void m(float x1, float y1) {
 }
 void M(float x0, float y0) {
   stop_drawing();
-  if (start_x == -1 && start_y == -1) {
-    start_x = x0;
-    start_y = y0;
-  }
+//  if (start_x == -1 && start_y == -1) {
+//    start_x = x0;
+//    start_y = y0;
+//  }
   goto_xy(x0, y0);  
   start_drawing();
 }
@@ -98,33 +128,35 @@ void h(float x1){
   H(pos_x + x1);  
 }
 void H(float x1) {
-  x0 = pos_x;
-  dx = ceil(x1 - x0);
-  if (dx > 0) {
-    for (float x = 0; x <= dx; x++){
-      goto_xy(x0 + x, pos_y);
-    }
-  } else {
-    for (float x = 0; x <= dx; x++) {
-      goto_xy(x0 - x, pos_y);  
-    }
-  }
+//  x0 = pos_x;
+  goto_xy(x1, pos_y);
+//  dx = ceil(x1 - x0);
+//  if (dx > 0) {
+//    for (float x = 0; x <= dx; x++){
+//      goto_xy(x0 + x, pos_y);
+//    }
+//  } else {
+//    for (float x = 0; x <= dx; x++) {
+//      goto_xy(x0 - x, pos_y);  
+//    }
+//  }
 }
 void v(float y1) {
   return V(pos_y + y1);  
 }
 void V(float y1) {
-  y0 = pos_y;
-  dy = ceil(y1 - y0);
-  if (dy > 0) {
-    for (float y = 0; y <= dy; y++) {
-      goto_xy(pos_x, y0 + y);
-    }
-  } else {
-    for (float y = 0; y <= dy; y++) {
-      goto_xy(pos_x, y0 - y);
-    }
-  }
+  goto_xy(pos_x, y1);
+//  y0 = pos_y;
+//  dy = ceil(y1 - y0);
+//  if (dy > 0) {
+//    for (float y = 0; y <= dy; y++) {
+//      goto_xy(pos_x, y0 + y);
+//    }
+//  } else {
+//    for (float y = 0; y <= dy; y++) {
+//      goto_xy(pos_x, y0 - y);
+//    }
+//  }
 }
 void c(float x1, float y1, float x2, float y2, float x3, float y3) {
   C(pos_x + x1, pos_y + y1, pos_x + x2, pos_y + y2, pos_x + x3, pos_y + y3);
@@ -160,9 +192,9 @@ void L(float x1, float y1) {
   }
 }
 void Z() {
-  L(start_x, start_y);
-  start_x = -1;
-  start_y = -1;  
+//  L(start_x, start_y);
+//  start_x = -1;
+//  start_y = -1;  
 }
 
 // void M(float x1, float y1) {
@@ -219,67 +251,67 @@ void cubic_bezier(float x0, float y0, float x1, float y1, float x2, float y2, fl
     }
 }
 
-void loop() {
-  String payload = Serial.readStringUntil("\n");
-  previous_index = -1;
-  next_index = payload.indexOf(";", 0);
-  while (next_index != -1) {
-    String line = payload.substring(previous_index + 1, next_index);
-    previous_index = next_index;
-    next_index = payload.indexOf(";", previous_index + 1);
-  
-    //  String payload = Serial.readStringUntil("\n");
-    String command = line.substring(0, 1);
-    String args = line.substring(1);
-    if (command == "C") {
-      int index1 = args.indexOf(",");
-      x1 = args.substring(0, index1).toFloat();
-      int index2 = args.indexOf(",", index1 + 1);
-      y1 = args.substring(index1 + 1, index2).toFloat();
-      int index3 = args.indexOf(",", index2 + 1);
-      x2 = args.substring(index2 + 1, index3).toFloat();
-      int index4 = args.indexOf(",", index3 + 1);
-      y2 = args.substring(index3 + 1, index4).toFloat();
-      int index5 = args.indexOf(",", index4 + 1);
-      x3 = args.substring(index4 + 1, index5).toFloat();
-      int index6 = args.indexOf("\r");
-      y3 = args.substring(index5 + 1, index6).toFloat();
-  //    Serial.println("ack " + command + " " + x1 + " " + y1 + " " + x2 + " " + y2 + " " + x3 + " " + y3);
-      C(x1, y1, x2, y2, x3, y3);
-//      Serial.println("ack");
-    } else if (command == "M") {
-      int index1 = args.indexOf(",");
-      x1 = args.substring(0, index1).toFloat();
-      int index2 = args.indexOf(",", index1 + 1);
-      y1 = args.substring(index1 + 1, index2).toFloat();
-      M(x1, y1);
-//      Serial.println("ack");
-    } else if (command == "L") {
-      int index1 = args.indexOf(",");
-      x1 = args.substring(0, index1).toFloat();
-      int index2 = args.indexOf(",", index1 + 1);
-      y1 = args.substring(index1 + 1, index2).toFloat();
-      L(x1, y1);
-//      Serial.println("ack");
-    } else if (command == "H") {
-      int index1 = args.indexOf(",");
-      x1 = args.substring(0, index1).toFloat();
-      H(x1);
-//      Serial.println("ack");
-    } else if (command == "V") {
-      int index1 = args.indexOf(",");
-      y1 = args.substring(0, index1).toFloat();
-      V(y1);
-//      Serial.println("ack");
-    } else if (command == "Z") {
-      Z();
-//      Serial.println("ack");
-    } else if (command == "R") {
-      reset();
-//      Serial.println("ack");
-    }
-  }
-  Serial.println("ack");
+void loop() {  
+//  String payload = Serial.readStringUntil("\n");
+//  previous_index = -1;
+//  next_index = payload.indexOf(";", 0);
+//  while (next_index != -1) {
+//    String line = payload.substring(previous_index + 1, next_index);
+//    previous_index = next_index;
+//    next_index = payload.indexOf(";", previous_index + 1);
+//  
+//    //  String payload = Serial.readStringUntil("\n");
+//    String command = line.substring(0, 1);
+//    String args = line.substring(1);
+//    if (command == "C") {
+//      int index1 = args.indexOf(",");
+//      x1 = args.substring(0, index1).toFloat();
+//      int index2 = args.indexOf(",", index1 + 1);
+//      y1 = args.substring(index1 + 1, index2).toFloat();
+//      int index3 = args.indexOf(",", index2 + 1);
+//      x2 = args.substring(index2 + 1, index3).toFloat();
+//      int index4 = args.indexOf(",", index3 + 1);
+//      y2 = args.substring(index3 + 1, index4).toFloat();
+//      int index5 = args.indexOf(",", index4 + 1);
+//      x3 = args.substring(index4 + 1, index5).toFloat();
+//      int index6 = args.indexOf("\r");
+//      y3 = args.substring(index5 + 1, index6).toFloat();
+//  //    Serial.println("ack " + command + " " + x1 + " " + y1 + " " + x2 + " " + y2 + " " + x3 + " " + y3);
+//      C(x1, y1, x2, y2, x3, y3);
+////      Serial.println("ack");
+//    } else if (command == "M") {
+//      int index1 = args.indexOf(",");
+//      x1 = args.substring(0, index1).toFloat();
+//      int index2 = args.indexOf(",", index1 + 1);
+//      y1 = args.substring(index1 + 1, index2).toFloat();
+//      M(x1, y1);
+////      Serial.println("ack");
+//    } else if (command == "L") {
+//      int index1 = args.indexOf(",");
+//      x1 = args.substring(0, index1).toFloat();
+//      int index2 = args.indexOf(",", index1 + 1);
+//      y1 = args.substring(index1 + 1, index2).toFloat();
+//      L(x1, y1);
+////      Serial.println("ack");
+//    } else if (command == "H") {
+//      int index1 = args.indexOf(",");
+//      x1 = args.substring(0, index1).toFloat();
+//      H(x1);
+////      Serial.println("ack");
+//    } else if (command == "V") {
+//      int index1 = args.indexOf(",");
+//      y1 = args.substring(0, index1).toFloat();
+//      V(y1);
+////      Serial.println("ack");
+//    } else if (command == "Z") {
+//      Z();
+////      Serial.println("ack");
+//    } else if (command == "R") {
+//      reset();
+////      Serial.println("ack");
+//    }
+//  }
+//  Serial.println("ack");
 }
 //void bla() {
 //  String payload = Serial.readStringUntil("\n");

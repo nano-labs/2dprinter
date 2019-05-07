@@ -76,19 +76,19 @@ class SVG:
             commands.extend(p.commands)
 
         # Com Borda
-        commands.append("M0.0,{}.0".format(self.max_y))
-        commands.append("L0.0,0.0")
-        commands.append("L{}.0,0.0".format(self.max_x))
-        commands.append("L{}.0,{}.0".format(self.max_x, self.max_y))
-        commands.append("L0.0,{}.0".format(self.max_y))
+        # commands.append("M0.0,{}.0".format(self.max_y))
+        # commands.append("L0.0,0.0")
+        # commands.append("L{}.0,0.0".format(self.max_x))
+        # commands.append("L{}.0,{}.0".format(self.max_x, self.max_y))
+        # commands.append("L0.0,{}.0".format(self.max_y))
         # Sem borda
-        # commands.append("M0.0,{}.0".format(self.bed_size[1]))
+        commands.append("M0.0,{}.0".format(self.bed_size[1]))
 
         messages = []
         for command in tqdm(commands):
             # print(command)
             messages.append(command)
-            if len(messages) >= 3:
+            if len(messages) >= 20:
                 payload = "{};\r\n".format(";".join(messages))
                 messages = []
                 ser.write(bytes(payload.encode()))
@@ -127,8 +127,21 @@ class Path:
             args = args.replace("  ", " ").replace(" ", ",")
             args = [float(f) for f in args.split(",")]
             args = [a * self.zoom for a in args]
+            # if command == "M":
+            #     return self.M(*args)
             if command == "M":
-                return self.M(*args)
+                pen_up = True
+                subargs = []
+                for a in args:
+                    subargs.append(a)
+                    if len(subargs) == 2:
+                        if pen_up:
+                            self.M(*subargs)
+                            pen_up = False
+                        else:
+                            self.L(*subargs)
+                        subargs = []
+
             elif command == "m":
                 pen_up = True
                 subargs = []
@@ -156,7 +169,12 @@ class Path:
                     self.V(a)
 
             elif command == "L":
-                return self.L(*args)
+                subargs = []
+                for a in args:
+                    subargs.append(a)
+                    if len(subargs) == 2:
+                        self.L(*subargs)
+                        subargs = []
             elif command == "l":
                 subargs = []
                 for a in args:
@@ -182,7 +200,7 @@ class Path:
 
         command = ""
         for l in d:
-            if l in "MmLlHhVvCcZz":
+            if l in "MmLlHhVvCcZzq":
                 parse_command(command)
                 command = l
             else:
@@ -294,7 +312,7 @@ class Path:
         )
 
     def Z(self):
-        self.L(*self.start)
+        # self.L(*self.start)
         self.start = None
         self.commands.append("Z")
 
