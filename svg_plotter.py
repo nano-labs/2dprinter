@@ -312,7 +312,7 @@ class Path:
         )
 
     def Z(self):
-        # self.L(*self.start)
+        self.L(*self.start)
         self.start = None
         self.commands.append("Z")
 
