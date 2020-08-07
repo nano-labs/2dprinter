@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 import os
 from sys import argv
 from PIL import Image
@@ -10,13 +11,9 @@ from tqdm import tqdm
 
 class SVG:
 
-    # def __init__(self, svg_file, bed_size=(6200, 13000)):
-    def __init__(self, svg_file, bed_size=(5000, 10000)):
+    def __init__(self, svg_file, bed_size=(10840, 7320)):
         doc = minidom.parse(svg_file)
-        path_strings = [
-            path.getAttribute('d')
-            for path in doc.getElementsByTagName('path')
-        ]
+        path_strings = [path.getAttribute('d') for path in doc.getElementsByTagName('path')]
         self.paths = []
         self.bed_size = bed_size
         zoom = 1.0
@@ -38,7 +35,7 @@ class SVG:
                 ys.append(y)
         self.max_x, self.max_y = ceil(max(xs)), ceil(max(ys))
         size = (self.max_x, self.max_y)
-        return size        
+        return size
 
     def draw(self):
         size = self.get_size()
@@ -53,14 +50,14 @@ class SVG:
                 if p.startswith("cu.usb"):
                     return "/dev/{}".format(p)
 
-        ser = serial.Serial(find_serial_port(), 57600, timeout=1)
+        ser = serial.Serial(find_serial_port(), 115200, timeout=1)
         sleep(3)
 
         r = ser.readline()
-        print("Waiting serial connection", end = '')
+        print("Waiting serial connection", end='')
         while not r == b'started\r\n':
             sleep(1)
-            print(".", end = '')
+            print(".", end='')
             r = ser.readline()
 
         # print("\nReseting params", end = '')
@@ -88,7 +85,7 @@ class SVG:
         for command in tqdm(commands):
             # print(command)
             messages.append(command)
-            if len(messages) >= 20:
+            if len(messages) >= 5:
                 payload = "{};\r\n".format(";".join(messages))
                 messages = []
                 ser.write(bytes(payload.encode()))
@@ -103,7 +100,6 @@ class SVG:
 
 
 class Path:
-
     def __init__(self, path_string, zoom):
         self._all = []
         self.pos_x = 0.0
@@ -207,18 +203,27 @@ class Path:
                 command += l
         parse_command(command)
 
-
     def goto_xy(self, x, y):
         self._all.append((x, y))
         self.pos_x = x
         self.pos_y = y
 
     def cubic_bezier(self, x0, y0, x1, y1, x2, y2, x3, y3):
-        delta =  int(max(abs(x3- x0), abs(y3 - y0)) * 2)
+        delta = int(max(abs(x3 - x0), abs(y3 - y0)) * 2)
         for t in range(delta):
             t = t / delta
-            x = (1-t)**3 * x0 + 3*(1-t)**2 * t * x1 + 3*(1-t) * t**2 * x2 + t**3 * x3
-            y = (1-t)**3 * y0 + 3*(1-t)**2 * t * y1 + 3*(1-t) * t**2 * y2 + t**3 * y3
+            x = (
+                (1 - t) ** 3 * x0
+                + 3 * (1 - t) ** 2 * t * x1
+                + 3 * (1 - t) * t ** 2 * x2
+                + t ** 3 * x3
+            )
+            y = (
+                (1 - t) ** 3 * y0
+                + 3 * (1 - t) ** 2 * t * y1
+                + 3 * (1 - t) * t ** 2 * y2
+                + t ** 3 * y3
+            )
             self.goto_xy(x, y)
 
     def m(self, x1, y1):
@@ -228,9 +233,7 @@ class Path:
         if not self.start:
             self.start = (x0, y0)
         self.goto_xy(x0, y0)
-        self.commands.append(
-            "M{:.1f},{:.1f}".format(x0, y0)
-        )
+        self.commands.append("M{:.1f},{:.1f}".format(x0, y0))
 
     def h(self, x1):
         return self.H(self.pos_x + x1)
@@ -244,9 +247,7 @@ class Path:
         else:
             for x in range(abs(dx)):
                 self.goto_xy(x0 - x, self.pos_y)
-        self.commands.append(
-            "H{:.1f}".format(x1)
-        )
+        self.commands.append("H{:.1f}".format(x1))
 
     def v(self, y1):
         return self.V(self.pos_y + y1)
@@ -260,29 +261,23 @@ class Path:
         else:
             for y in range(abs(dy)):
                 self.goto_xy(self.pos_x, y0 - y)
-        self.commands.append(
-            "V{:.1f}".format(y1)
-        )
+        self.commands.append("V{:.1f}".format(y1))
 
     def c(self, x1, y1, x2, y2, x3, y3):
         self.C(
-            self.pos_x + x1, self.pos_y + y1,
-            self.pos_x + x2, self.pos_y + y2,
-            self.pos_x + x3, self.pos_y + y3
+            self.pos_x + x1,
+            self.pos_y + y1,
+            self.pos_x + x2,
+            self.pos_y + y2,
+            self.pos_x + x3,
+            self.pos_y + y3,
         )
 
     def C(self, x1, y1, x2, y2, x3, y3):
         # self.start = (self.pos_x, self.pos_y)
         self.cubic_bezier(self.pos_x, self.pos_y, x1, y1, x2, y2, x3, y3)
         self.commands.append(
-            "C{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f}".format(
-                x1,
-                y1,
-                x2,
-                y2,
-                x3,
-                y3
-            )
+            "C{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f}".format(x1, y1, x2, y2, x3, y3)
         )
 
     def l(self, x1, y1):
@@ -305,11 +300,9 @@ class Path:
             else:
                 for mx in range(int(x0), int(x1), -1):
                     my = y0 + dy * (mx - x0) / dx
-                    self.goto_xy(mx, my);
+                    self.goto_xy(mx, my)
             self.goto_xy(x1, y1)
-        self.commands.append(
-            "L{:.1f},{:.1f}".format(x1, y1)
-        )
+        self.commands.append("L{:.1f},{:.1f}".format(x1, y1))
 
     def Z(self):
         self.L(*self.start)

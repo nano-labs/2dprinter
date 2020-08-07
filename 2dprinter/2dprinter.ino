@@ -4,20 +4,30 @@
 #include <Servo.h>
 //#include <math.h>
 
-#define STEPS_PER_MOTOR_REVOLUTION 32
 
-Stepper stepper_y(STEPS_PER_MOTOR_REVOLUTION, 8, 2, 9, 7);
-//Stepper stepper_y(STEPS_PER_MOTOR_REVOLUTION, 8, 10, 9, 11);
-Stepper stepper_x(STEPS_PER_MOTOR_REVOLUTION, 4, 5, 3, 6);
+// Stepper Motor X
+const int stepXPin = 2;
+const int stepXDir = 5;
+
+// Stepper Motor Y
+const int stepYPin = 3;
+const int stepYDir = 6;
+
+// Servo motor Z
+const int servoZPin = 7;
 Servo servo_z;
 
-const int chipSelect = 10;
-const int switch_x = A2;
-const int switch_y = A1;
+const int switch_x = 9;
+const int switch_y = 10;
 
-float mm_per_step = 0.0194;
-//float steps_per_mm = 1.0 / mm_per_step;
-float steps_per_mm = 1.0;
+// Table max dimensions
+const int maxX = 10840;  // mm / 10
+const int maxY = 7320;  // mm / 10
+
+const float steps_per_mm = 1.0;
+const int maxSpeed = 1000; // mm/s
+const int stepperDelay = 500000 / (steps_per_mm * maxSpeed); // [(1s * 1000000micro s) / 2] / (max speed * steps per milimiter)
+
 float pos_x = 0.0;
 float pos_y = 0.0;
 float start_x = -1;
@@ -38,40 +48,74 @@ int previous_index = 0;
 int next_index = 0;
 
 void setup() {
-  stepper_y.setSpeed(1000);
-  stepper_x.setSpeed(1000);
-  servo_z.attach(14);
-  pinMode(switch_x, INPUT);
-  pinMode(switch_y, INPUT);
 
-  Serial.begin(57600);
+  servo_z.attach(servoZPin);
+  pinMode(switch_x, INPUT_PULLUP);
+  pinMode(switch_y, INPUT_PULLUP);
+
+  pinMode(stepXPin, OUTPUT); 
+  pinMode(stepXDir, OUTPUT);
+  pinMode(stepYPin, OUTPUT); 
+  pinMode(stepYDir, OUTPUT);
+
+  Serial.begin(115200);
   while (!Serial) {}
   Serial.println("started");
   servo_z.write(180);
   delay(5000);
-//  Serial.print("Initializing SD card...");
-
-//  // see if the card is present and can be initialized:
-//  if (!SD.begin(chipSelect)) {
-//    Serial.println("Card failed, or not present");
-//    // don't do anything more:
-//    while (1);
-//  }
-//  Serial.println("card initialized.");
-//  File dataFile = SD.open("plot.cmd");
   go_home();
 }
 
+void stepper_x_step(int steps) {
+  if (steps > 0) {
+    digitalWrite(stepXDir, LOW);
+    for(int x = 0; x < steps; x++) {
+      digitalWrite(stepXPin,HIGH); 
+      delayMicroseconds(stepperDelay); 
+      digitalWrite(stepXPin,LOW); 
+      delayMicroseconds(stepperDelay);
+    }
+  } else {
+    digitalWrite(stepXDir, HIGH);
+    for(int x = 0; x > steps; x--) {
+      digitalWrite(stepXPin,HIGH); 
+      delayMicroseconds(stepperDelay); 
+      digitalWrite(stepXPin,LOW); 
+      delayMicroseconds(stepperDelay); 
+    }
+  }
+}
+void stepper_y_step(int steps) {
+  if (steps > 0) {
+    digitalWrite(stepYDir, HIGH);
+    for(int y = 0; y < steps; y++) {
+      digitalWrite(stepYPin,HIGH); 
+      delayMicroseconds(stepperDelay); 
+      digitalWrite(stepYPin,LOW); 
+      delayMicroseconds(stepperDelay); 
+    }
+  } else {
+    digitalWrite(stepYDir, LOW);
+    for(int y = 0; y > steps; y--) {
+      digitalWrite(stepYPin,HIGH); 
+      delayMicroseconds(stepperDelay); 
+      digitalWrite(stepYPin,LOW); 
+      delayMicroseconds(stepperDelay); 
+    }
+  }
+}
+
+
 void go_home() {
-  while (digitalRead(switch_x) == LOW) {
+  while (digitalRead(switch_x) == HIGH) {
     goto_xy(pos_x -1, pos_y);
   }
-  goto_xy(pos_x + 150, pos_y);
+  goto_xy(pos_x + 200, pos_y);
   pos_x = 0.0;
-  while (digitalRead(switch_y) == LOW) {
+  while (digitalRead(switch_y) == HIGH) {
     goto_xy(pos_x, pos_y - 1);
   }
-  goto_xy(pos_x, pos_y + 150);
+  goto_xy(pos_x, pos_y + 200);
   pos_y = 0.0;
 }
 
@@ -107,10 +151,14 @@ int goto_xy(int pix_x, int pix_y) {
   float new_x = pix_x;
   float new_y = pix_y;
   float mov_x = ((pos_x - new_x) * steps_per_mm);
-  stepper_x.step(mov_x * -1);
+  if (new_x <= maxX) {
+    stepper_x_step(mov_x);
+  }
   pos_x = new_x;
   float mov_y = ((pos_y - new_y) * steps_per_mm);
-  stepper_y.step(mov_y);
+  if (new_y <= maxY) {
+    stepper_y_step(mov_y);
+  }
   pos_y = new_y;
 }
 
@@ -253,7 +301,7 @@ void cubic_bezier(float x0, float y0, float x1, float y1, float x2, float y2, fl
     }
 }
 
-void loop_certo() {  
+void loop() {  
  String payload = Serial.readStringUntil("\n");
  previous_index = -1;
  next_index = payload.indexOf(";", 0);
@@ -315,7 +363,34 @@ void loop_certo() {
  }
  Serial.println("ack");
 };
-void loop() {
+void _loop() {
+//  Serial.println(digitalRead(switch_x));
+  delay(15000);
+//  go_home();
+M(50.0,50.0);
+//M(0.0,1000.0);
+//M(1000.0,1000.0);
+//M(0.0,1000.0);
+//M(1000.0,1000.0);
+//M(0.0,1000.0);
+//M(1000.0,1000.0);
+//M(0.0,1000.0);
+//M(1000.0,1000.0);
+//M(0.0,1000.0);
+delay(10000);
+//M(1879.8,3954.0);
+//C(1793.5,3944.9,1694.8,3930.1,1660.5,3921.1);
+//M(1879.8,3954.0);
+//C(1793.5,3944.9,1694.8,3930.1,1660.5,3921.1);
+//M(1879.8,3954.0);
+//C(1793.5,3944.9,1694.8,3930.1,1660.5,3921.1);
+//M(1879.8,3954.0);
+//C(1793.5,3944.9,1694.8,3930.1,1660.5,3921.1);
+//M(1879.8,3954.0);
+//C(1793.5,3944.9,1694.8,3930.1,1660.5,3921.1);
+
+}
+void bla() {
 M(1879.8,3954.0);
 C(1793.5,3944.9,1694.8,3930.1,1660.5,3921.1);
 C(1557.3,3894.1,1460.7,3812.2,1426.5,3722.6);
@@ -626,10 +701,10 @@ delay(60000);
 ////  Serial.println(axis);
 ////  Serial.println(value);
 ////  if (axis == "x") {
-////    stepper_x.step(value);
+////    stepper_x_step(value);
 ////  };
 ////  if (axis == "y") {
-////    stepper_y.step(value);
+////    stepper_y_step(value);
 ////  }
 ////  stop_drawing();
 ////  goto_xy(1, 1);
@@ -714,21 +789,21 @@ delay(60000);
 //  }
 //  servo_z.write(70);
 //  delay(200);
-//  stepper_y.step(1000);
-//  stepper_x.step(1000);
-//  stepper_y.step(-1000);
-//  stepper_x.step(-1000);
+//  stepper_y_step(1000);
+//  stepper_x_step(1000);
+//  stepper_y_step(-1000);
+//  stepper_x_step(-1000);
 //  delay(100);
 //  servo_z.write(180);
 //  delay(200);
-//  stepper_y.step(-100);
-//  stepper_x.step(100);
+//  stepper_y_step(-100);
+//  stepper_x_step(100);
 
-//  stepper_y.step(random(-1000, 1000));
-//  stepper_x.step(random(-1000, 1000));
+//  stepper_y_step(random(-1000, 1000));
+//  stepper_x_step(random(-1000, 1000));
 //  delay(1000);
-//  stepper_y.step(-500);
-//  stepper_x.step(-500);
+//  stepper_y_step(-500);
+//  stepper_x_step(-500);
 //  delay(1000);
 
 //}

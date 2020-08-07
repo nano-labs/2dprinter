@@ -4,7 +4,8 @@ from random import choice, shuffle
 import serial
 from PIL import Image, ImageEnhance, ImageOps
 
-MAX_X = 140  # mm
+MAX_X = 1400  # mm
+
 
 def split_layers(im, layer_count=5):
     light, dark = 0, 255
@@ -13,29 +14,22 @@ def split_layers(im, layer_count=5):
             pix = im.getpixel((x, y))
             light = max(pix, light)
             dark = min(pix, dark)
-    layer_depth = ((light - dark) / layer_count)
+    layer_depth = (light - dark) / layer_count
     layers = [
-        (
-            (dark + (l * layer_depth)),
-            (dark + ((l + 1) * layer_depth))
-        )
-        for l in range(layer_count)
+        ((dark + (l * layer_depth)), (dark + ((l + 1) * layer_depth))) for l in range(layer_count)
     ]
     results = []
     # layer_image = Image.new("1", im.size, color=0)
     final_image = Image.new("L", im.size, color=255)
     for depth, layer in enumerate(layers[:], 1):
         layer_image = Image.new("L", im.size, color=255)
-        result = [
-            [0 for _ in range(im.size[0])]
-            for __ in range(im.size[1])
-        ]
+        result = [[0 for _ in range(im.size[0])] for __ in range(im.size[1])]
         for x in range(im.size[0]):
             for y in range(im.size[1]):
                 pix = im.getpixel((x, y))
                 if pix > layer[0] and pix < layer[1]:
-                    layer_image.putpixel((x, y), int(255 / (layer_count))*(depth - 1))
-                    final_image.putpixel((x, y), int(255 / (layer_count))*(depth - 1))
+                    layer_image.putpixel((x, y), int(255 / (layer_count)) * (depth - 1))
+                    final_image.putpixel((x, y), int(255 / (layer_count)) * (depth - 1))
                     result[y][x] = 1
         results.append(result)
         layer_image.show()
@@ -48,7 +42,6 @@ def split_layers(im, layer_count=5):
 
 
 class MazeEffect:
-
     def __init__(self, pixmap, pix_size=1.3, output=None, output_color=0, no_print=False):
         self.pixmap = pixmap[:]
         self.size = (len(pixmap[0]), len(pixmap))
@@ -92,7 +85,7 @@ class MazeEffect:
             r = self.ser.readline()
             while not r == b'ready\r\n':
                 r = self.ser.readline()
-            self.command_queue =[]
+            self.command_queue = []
 
     def find_pix(self):
         def test_pix(px, py):
@@ -175,38 +168,22 @@ class MazeEffect:
         if line_x == 1:
             for inc in range(6):
                 self.output.putpixel(
-                    (
-                        (self.cursor[0] * 5) + inc,
-                        (self.cursor[1] * 5)
-                    ),
-                    self.output_color
+                    ((self.cursor[0] * 5) + inc, (self.cursor[1] * 5)), self.output_color
                 )
         if line_x == -1:
             for inc in range(6):
                 self.output.putpixel(
-                    (
-                        (self.cursor[0] * 5) - inc,
-                        (self.cursor[1] * 5)
-                    ),
-                    self.output_color
+                    ((self.cursor[0] * 5) - inc, (self.cursor[1] * 5)), self.output_color
                 )
         if line_y == 1:
             for inc in range(6):
                 self.output.putpixel(
-                    (
-                        (self.cursor[0] * 5),
-                        (self.cursor[1] * 5) + inc
-                    ),
-                    self.output_color
+                    ((self.cursor[0] * 5), (self.cursor[1] * 5) + inc), self.output_color
                 )
         if line_y == -1:
             for inc in range(6):
                 self.output.putpixel(
-                    (
-                        (self.cursor[0] * 5),
-                        (self.cursor[1] * 5) - inc
-                    ),
-                    self.output_color
+                    ((self.cursor[0] * 5), (self.cursor[1] * 5) - inc), self.output_color
                 )
 
         self.pen_down()
@@ -292,7 +269,6 @@ class MazeEffect:
             sequence()
         self.move_to((0, 0), terminate=True)
 
-
     def process(self):
         self.move_to((0, 0))
         pix = self.find_pix()
@@ -313,18 +289,18 @@ class MazeEffect:
         self.move_to((0, 0), terminate=True)
         return self.output
 
-class DotEffect:
 
+class DotEffect:
     def __init__(self, layers):
         self.layers = layers
-        self.ser = serial.Serial("/dev/tty.usbmodemFA131", 57600, timeout=1)
+        # self.ser = serial.Serial("/dev/tty.usbmodemFA131", 57600, timeout=1)
 
     def point(self, x, y):
         print("p{},{}\n".format(x, y))
-        self.ser.write(bytes("p{},{}\n".format(x, y).encode()))
-        r = self.ser.readline()
-        while not r == b'ready\r\n':
-            r = self.ser.readline()        
+        # self.ser.write(bytes("p{},{}\n".format(x, y).encode()))
+        # r = self.ser.readline()
+        # while not r == b'ready\r\n':
+        #     r = self.ser.readline()
 
     def process_layer(self, layer):
         for y, line in enumerate(layer):
@@ -339,26 +315,29 @@ class DotEffect:
 
 
 def run():
-    me = MazeEffect([[0 for x in range(25)] for y in range(45)], pix_size=1.5, no_print=False)
-    me.test_page()
-    me.output.show()
-    return
+    # me = MazeEffect([[0 for x in range(25)] for y in range(45)], pix_size=1.5, no_print=False)
+    # me.test_page()
+    # me.output.show()
+    # return
 
     image = Image.open("img.jpg")
     image = image.convert("L")
     # image = ImageOps.invert(image)
 
     # image = ImageEnhance.Contrast(image).enhance(1.3)
-    output = None
+    # output = None
+    # layers = split_layers(image, 2)
+    # for index, pmap in enumerate(layers):
+    #     output_color = int(index * (255 / len(layers)))
+    #     if input() == "s":
+    #         continue
+    #     me = MazeEffect(
+    #         pmap, pix_size=0.95, output=output, output_color=output_color, no_print=True
+    #     )
+    #     output = me.process()
     layers = split_layers(image, 3)
-    for index, pmap in enumerate(layers):
-        output_color = int(index * (255 / len(layers)))
-        if input() == "s":
-            continue
-        me = MazeEffect(pmap, pix_size=0.95, output=output, output_color=output_color, no_print=False)
-        output = me.process()
-    # layers = split_layers(image, 3)
-    # de = DotEffect(layers)
-    # de.process()
+    de = DotEffect(layers)
+    de.process()
+
 
 run()
