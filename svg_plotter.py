@@ -14,10 +14,11 @@ from cairosvg import svg2png
 
 
 class SVG:
-    # def __init__(self, svg_file, bed_size=(10840, 7320)):
-    def __init__(self, svg_file, bed_size=(Decimal(1084), Decimal(732))):
-        # def __init__(self, svg_file, bed_size=(5840, 3620)):
+    # def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(1084), Decimal(732))):
+    def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(5840), Decimal(3820))):
+        # def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(10840), Decimal(7320))):
         self.svg_file = svg_file
+        self.infill_file = infill_file or svg_file
         doc = minidom.parse(svg_file)
         path_strings = [path.getAttribute('d') for path in doc.getElementsByTagName('path')]
         self.paths = []
@@ -50,15 +51,17 @@ class SVG:
         output = Image.new("RGB", size, color=(255, 255, 255))
         for p in self.paths:
             output = p.draw(output)
-        output = self.make_infill_map(output)
+        base_infill_map = self.make_infill_map(output, self.svg_file)
+        shade_infill_map = self.make_infill_map(output, self.infill_file)
 
         output = Image.new("RGB", size, color=(255, 255, 255))
-        output = self.add_infill(output, density=30)
+        output = self.add_infill(base_infill_map, output, density=10)
+        output = self.add_diagonal_infill(shade_infill_map, output, density=10)
         for p in self.paths:
             output = p.draw(output)
         output.show()
 
-    def make_infill_map(self, output):
+    def make_infill_map(self, output, infill_file):
         def get_min_image(im):
             """Return the minimum image box containing all image pixels."""
             max_pixel = (0, 0)
@@ -71,7 +74,8 @@ class SVG:
                         min_pixel = (min(x, min_pixel[0]), min(y, min_pixel[1]))
             return im.crop((min_pixel[0], min_pixel[1], max_pixel[0] + 2, max_pixel[1] + 2,))
 
-        with open(self.svg_file, "r") as svg:
+        infill_file = infill_file or self.infill_file
+        with open(infill_file, "r") as svg:
             svg2 = BytesIO(svg.read().replace("stroke:#000000;", "").encode('ascii'))
             png = BytesIO()
             svg2png(file_obj=svg2, write_to=png, dpi=300)
@@ -85,14 +89,10 @@ class SVG:
         min_map = min_map.resize(min_output.size)
         new_image = Image.new("1", self.size, "WHITE")
         new_image.paste(min_map, (self.size[0] - min_map.size[0], self.size[1] - min_map.size[1]))
-        new_image.show()
-        # im.show()
-        # self.infill_map.show()
-        self.infill_map = new_image
-        return self.infill_map
+        return new_image
 
-    def add_infill(self, output, density=10):
-        im = self.infill_map
+    def add_infill(self, infill_map, output, density=10):
+        im = infill_map
         step = int(output.size[1] / (output.size[1] * (density / 100)))
         for y in range(0, output.size[1], step):
             start_x, end_x = None, None
@@ -110,6 +110,36 @@ class SVG:
                     start_x, end_x = None, None
             if start_x is not None and end_x is not None:
                 path_string = "M {},{} L {},{}".format(start_x, y, end_x, y)
+                self.paths.append(Path(path_string=path_string, zoom=1))
+
+        return output
+
+    def add_diagonal_infill(self, infill_map, output, density=10):
+        im = infill_map
+        step = int(output.size[1] / (output.size[1] * (density / 100)))
+        for y in range(0, output.size[1] + output.size[0], step):
+            start_x_y, end_x_y = None, None
+            for x in range(min(y, output.size[0])):
+                _y = y - x
+                if _y >= output.size[1]:
+                    continue
+                pixel = im.getpixel((x, _y))
+                if pixel == 0:
+                    if start_x_y is None:
+                        start_x_y = (x, _y)
+                    else:
+                        end_x_y = (x, _y)
+                else:
+                    if start_x_y is not None and end_x_y is not None:
+                        path_string = "M {},{} L {},{}".format(
+                            start_x_y[0], start_x_y[1], end_x_y[0], end_x_y[1]
+                        )
+                        self.paths.append(Path(path_string=path_string, zoom=1))
+                    start_x_y, end_x_y = None, None
+            if start_x_y is not None and end_x_y is not None:
+                path_string = "M {},{} L {},{}".format(
+                    start_x_y[0], start_x_y[1], end_x_y[0], end_x_y[1]
+                )
                 self.paths.append(Path(path_string=path_string, zoom=1))
 
         return output
@@ -495,6 +525,9 @@ class Path:
 
 if __name__ == "__main__":
     file_path = argv[1]
-    s = SVG(file_path)
+    infill = None
+    if len(argv) == 3:
+        infill = argv[2]
+    s = SVG(svg_file=file_path, infill_file=infill)
     s.draw()
     s.plot()
