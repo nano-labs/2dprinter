@@ -12,25 +12,33 @@ import serial
 from tqdm import tqdm
 from cairosvg import svg2png
 
+PIXELS_PER_MM = Decimal(40)
+MAX_BED_PIXELS = (10840, 7320)
+MAX_BED = (MAX_BED_PIXELS[0] / PIXELS_PER_MM, MAX_BED_PIXELS[1] / PIXELS_PER_MM)
+
 
 class SVG:
-    # def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(1084), Decimal(732))):
-    def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(5840), Decimal(3820))):
-        # def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(10840), Decimal(7320))):
+    def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(230), Decimal(181))):
+        self.bed_size = (bed_size[0] * PIXELS_PER_MM, bed_size[1] * PIXELS_PER_MM)
+        assert self.bed_size[0] <= MAX_BED_PIXELS[0], (
+            "Bed_size cannot be bigger than %smm x %smm" % MAX_BED
+        )
+        assert self.bed_size[1] <= MAX_BED_PIXELS[1], (
+            "Bed_size cannot be bigger than %smm x %smm" % MAX_BED
+        )
         self.svg_file = svg_file
         self.infill_file = infill_file or svg_file
         doc = minidom.parse(svg_file)
         path_strings = [path.getAttribute('d') for path in doc.getElementsByTagName('path')]
         self.paths = []
-        self.bed_size = bed_size
         zoom = Decimal(1.0)
-        for path_string in path_strings:
+        for path_string in tqdm(path_strings, desc="Scalling"):
             p = Path(path_string, zoom=zoom)
             self.paths.append(p)
         self.size = self.get_size()
-        zoom = min(bed_size[0] / self.size[0], bed_size[1] / self.size[1])
+        zoom = min(self.bed_size[0] / self.size[0], self.bed_size[1] / self.size[1])
         self.paths = []
-        for path_string in path_strings:
+        for path_string in tqdm(path_strings, desc="Base paths"):
             p = Path(path_string, zoom=zoom)
             self.paths.append(p)
         self.size = self.get_size()
@@ -49,15 +57,16 @@ class SVG:
     def draw(self):
         size = self.get_size()
         output = Image.new("RGB", size, color=(255, 255, 255))
-        for p in self.paths:
+        for p in tqdm(self.paths, "Cutting"):
             output = p.draw(output)
         base_infill_map = self.make_infill_map(output, self.svg_file)
         shade_infill_map = self.make_infill_map(output, self.infill_file)
 
         output = Image.new("RGB", size, color=(255, 255, 255))
-        output = self.add_infill(base_infill_map, output, density=10)
-        output = self.add_diagonal_infill(shade_infill_map, output, density=10)
-        for p in self.paths:
+        # output = self.add_infill(base_infill_map, output, density=10)
+        output = self.add_vertical_infill(base_infill_map, output, step_mm=1.2)
+        output = self.add_diagonal_infill(shade_infill_map, output, step_mm=1.2, rotate=True)
+        for p in tqdm(self.paths, desc="Drawing"):
             output = p.draw(output)
         output.show()
 
@@ -66,7 +75,7 @@ class SVG:
             """Return the minimum image box containing all image pixels."""
             max_pixel = (0, 0)
             min_pixel = min_map.size[:]
-            for y in range(im.size[1]):
+            for y in tqdm(range(im.size[1]), desc="Mapping infill"):
                 for x in range(im.size[0]):
                     pixel = im.getpixel((x, y))
                     if pixel == 0 or pixel == (0, 0, 0):
@@ -91,10 +100,10 @@ class SVG:
         new_image.paste(min_map, (self.size[0] - min_map.size[0], self.size[1] - min_map.size[1]))
         return new_image
 
-    def add_infill(self, infill_map, output, density=10):
+    def add_infill(self, infill_map, output, step_mm=1.0):
         im = infill_map
-        step = int(output.size[1] / (output.size[1] * (density / 100)))
-        for y in range(0, output.size[1], step):
+        step = Decimal(step_mm) * PIXELS_PER_MM
+        for y in tqdm(range(0, output.size[1], int(step)), desc="Horizontal Infill"):
             start_x, end_x = None, None
             for x in range(output.size[0]):
                 pixel = im.getpixel((x, y))
@@ -114,14 +123,41 @@ class SVG:
 
         return output
 
-    def add_diagonal_infill(self, infill_map, output, density=10):
+    def add_vertical_infill(self, infill_map, output, step_mm=1.0):
         im = infill_map
-        step = int(output.size[1] / (output.size[1] * (density / 100)))
-        for y in range(0, output.size[1] + output.size[0], step):
+        step = Decimal(step_mm) * PIXELS_PER_MM
+        for x in tqdm(range(0, output.size[0], int(step)), desc="Vertical Infill"):
+            start_y, end_y = None, None
+            for y in range(output.size[1]):
+                pixel = im.getpixel((x, y))
+                if pixel == 0:
+                    if start_y is None:
+                        start_y = y
+                    else:
+                        end_y = y
+                else:
+                    if start_y is not None and end_y is not None:
+                        path_string = "M {},{} L {},{}".format(x, start_y, x, end_y)
+                        self.paths.append(Path(path_string=path_string, zoom=1))
+                    start_y, end_y = None, None
+            if start_y is not None and end_y is not None:
+                path_string = "M {},{} L {},{}".format(x, start_y, x, end_y)
+                self.paths.append(Path(path_string=path_string, zoom=1))
+
+        return output
+
+    def add_diagonal_infill(self, infill_map, output, step_mm=1.0, rotate=False):
+        im = infill_map
+        step = Decimal(step_mm) * PIXELS_PER_MM
+        y_range = range(0, output.size[1] + output.size[0], int(step))
+        for y in tqdm(y_range, desc="Diagonal infill"):
             start_x_y, end_x_y = None, None
-            for x in range(min(y, output.size[0])):
-                _y = y - x
-                if _y >= output.size[1]:
+            x_range = range(min(y, output.size[0]))
+            if rotate:
+                x_range = range(output.size[0] - 1, 0, -1)
+            for index, x in enumerate(x_range):
+                _y = y - index
+                if _y >= output.size[1] or _y < 0:
                     continue
                 pixel = im.getpixel((x, _y))
                 if pixel == 0:
@@ -181,16 +217,20 @@ class SVG:
         # Sem borda
         # commands.append("M0.0,{}.0".format(self.bed_size[1]))
 
+        MAX_BUFFER_SIZE = 300
         messages = []
-        for command in tqdm(commands):
-            # print(command)
-            messages.append(command)
-            if len(messages) >= 5:
+        # for command in commands:
+        #     print("{}({});".format(command[0], command[1:]))
+
+        for command in tqdm(commands, desc="Printing"):
+            if len("{};\r\n".format(";".join(messages + [command]))) >= MAX_BUFFER_SIZE:
                 payload = "{};\r\n".format(";".join(messages))
-                messages = []
+                messages = [command]
                 ser.write(bytes(payload.encode()))
                 while not ser.readline() == b'ack\r\n':
                     pass
+            else:
+                messages.append(command)
         if messages:
             payload = "{};\r\n".format(";".join(messages))
             ser.write(bytes(payload.encode()))
@@ -397,26 +437,7 @@ class Path:
             return self.H(x1)
         else:
             self._line(x0, y0, x1, y1)
-        #     if abs(dx) >= abs(dy):
-        #         if x1 > x0:
-        #             for mx in range(int(x0), int(x1)):
-        #                 my = y0 + dy * (mx - x0) / dx
-        #                 self.goto_xy(mx, my)
-        #         else:
-        #             for mx in range(int(x0), int(x1), -1):
-        #                 my = y0 + dy * (mx - x0) / dx
-        #                 self.goto_xy(mx, my)
-        #     else:
-        #         if y1 > y0:
-        #             for my in range(int(y0), int(y1)):
-        #                 mx = x0 + dx * (my - y0) / dy
-        #                 self.goto_xy(mx, my)
-        #         else:
-        #             for my in range(int(y0), int(y1), -1):
-        #                 mx = x0 + dx * (my - y0) / dy
-        #                 self.goto_xy(mx, my)
 
-        #     self.goto_xy(x1, y1)
         self.commands.append("L{:.1f},{:.1f}".format(x1, y1))
 
     def _line(self, x0, y0, x1, y1):
@@ -453,74 +474,8 @@ class Path:
         for x, y in self._all:
             # output.putpixel((int(x) + self.move_x, int(y) + self.move_y), color)
             output.putpixel((int(x), int(y)), color)
-        # for command in self.commands:
-        #     print("{}({});".format(command[0], command[1:]))
 
         return output
-
-    # def infill(self, output):
-    #     return output
-
-    #     def draw_line(y, x0, x1):
-    #         for x in range(x0, x1 + 1):
-    #             output.putpixel((x, y), (0, 0, 0))
-    #         return output
-
-    #     if not self.fill:
-    #         return output
-
-    #     scanlines = defaultdict(list)
-    #     for x, y in self._all:
-    #         scanlines[int(y)].append(int(x))
-    #     scanlines = [[y, sorted(list(set(xs)))] for y, xs in sorted(scanlines.items())]
-    #     for y, xs in scanlines:
-    #         if len(xs) == 1:
-    #             continue
-    #         x0, x1 = None, None
-    #         ready = False
-    #         print(xs)
-    #         # [139, 156, 157, 158, 385, 521, 522, 523]
-    #         # 139 158
-    #         for x in xs:
-    #             if x0 is None:
-    #                 x0 = x
-    #                 continue
-    #             else:
-    #                 if x == x0 + 1:
-    #                     x0 = x
-    #                 elif x1 is None:
-    #                     x1 = x
-    #                 elif x1 is not None and x == x1 + 1:
-    #                     x1 = x
-    #                 elif x1 is not None and not x == x1 + 1:
-    #                     ready = True
-    #             if ready:
-    #                 print(x0, x1)
-    #                 output = draw_line(y, x0, x1)
-    #                 x0, x1 = x, None
-    #                 ready = False
-    #         if x0 is not None and x1 is not None:
-    #             print(x0, x1)
-    #             output = draw_line(y, x0, x1)
-
-    #     return output
-
-    # def plot(self, ser):
-    #     messages = []
-    #     for command in self.commands:
-    #         print(command)
-    #         messages.append(command)
-    #         if len(messages) >= 10:
-    #             payload = "{};\r\n".format(";".join(messages))
-    #             messages = []
-    #             ser.write(bytes(payload.encode()))
-    #             while not ser.readline() == b'ack\r\n':
-    #                 pass
-    #     if messages:
-    #         payload = "{};\r\n".format(";".join(messages))
-    #         ser.write(bytes(payload.encode()))
-    #         while not ser.readline() == b'ack\r\n':
-    #             pass
 
 
 if __name__ == "__main__":
