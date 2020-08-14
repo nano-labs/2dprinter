@@ -2,7 +2,7 @@
 import os
 from decimal import Decimal
 from io import BytesIO
-from math import ceil, floor
+from math import ceil, cos, sin, sqrt
 from sys import argv
 from time import sleep
 
@@ -18,7 +18,8 @@ MAX_BED = (MAX_BED_PIXELS[0] / PIXELS_PER_MM, MAX_BED_PIXELS[1] / PIXELS_PER_MM)
 
 
 class SVG:
-    def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(230), Decimal(181))):
+    # def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(230), Decimal(181))):
+    def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(200), Decimal(150))):
         self.bed_size = (bed_size[0] * PIXELS_PER_MM, bed_size[1] * PIXELS_PER_MM)
         assert self.bed_size[0] <= MAX_BED_PIXELS[0], (
             "Bed_size cannot be bigger than %smm x %smm" % MAX_BED
@@ -64,8 +65,9 @@ class SVG:
 
         output = Image.new("RGB", size, color=(255, 255, 255))
         # output = self.add_infill(base_infill_map, output, density=10)
-        output = self.add_vertical_infill(base_infill_map, output, step_mm=1.2)
-        output = self.add_diagonal_infill(shade_infill_map, output, step_mm=1.2, rotate=True)
+        # output = self.add_vertical_infill(base_infill_map, output, step_mm=1.2)
+        output = self.add_nautilus_infill(base_infill_map, output, step_mm=1.0)
+        # output = self.add_diagonal_infill(shade_infill_map, output, step_mm=1.2, rotate=True)
         for p in tqdm(self.paths, desc="Drawing"):
             output = p.draw(output)
         output.show()
@@ -79,8 +81,9 @@ class SVG:
                 for x in range(im.size[0]):
                     pixel = im.getpixel((x, y))
                     if pixel == 0 or pixel == (0, 0, 0):
-                        max_pixel = (max(x, max_pixel[0]), max(y, max_pixel[1]))
                         min_pixel = (min(x, min_pixel[0]), min(y, min_pixel[1]))
+                        max_pixel = (max(x, max_pixel[0]), y)
+
             return im.crop((min_pixel[0], min_pixel[1], max_pixel[0] + 2, max_pixel[1] + 2,))
 
         infill_file = infill_file or self.infill_file
@@ -180,6 +183,58 @@ class SVG:
 
         return output
 
+    def add_nautilus_infill(self, infill_map, output, step_mm=1.0):
+        def pix_distance(a, b):
+            catx = abs(a[0] - b[0])
+            caty = abs(a[1] - b[1])
+            return int(sqrt(catx * catx + caty * caty))
+
+        im = infill_map
+        step = Decimal(step_mm) * PIXELS_PER_MM
+        min_movement = 1 * PIXELS_PER_MM
+        self.paths = []
+
+        center = (int(im.size[0] / 2), int(im.size[1] / 2))
+        max_radius = Decimal(sqrt(im.size[0] * im.size[0] + im.size[1] * im.size[1]))
+        grad_to_rad = 0.01745329252
+        angle = 0.0
+        radius = min_movement
+        start_point = None
+        end_point = None
+        path_string = ""
+        with tqdm(total=int(max_radius), desc="Nautilus infill") as pbar:
+            while radius < max_radius:
+                pbar.update(int(step))
+                for angle in range(36000):
+                    radius += step / 36000
+                    angle = Decimal((angle / 100.0) * grad_to_rad)
+                    x = int(center[0] + (radius * Decimal(cos(angle))))
+                    y = int(center[1] + (radius * Decimal(sin(angle))))
+                    if x >= im.size[0] or y >= im.size[1] or x < 0 or y < 0:
+                        start_point = None
+                        end_point = None
+                        continue
+                    pixel = im.getpixel((x, y))
+                    if pixel == 0:
+                        if start_point is None:
+                            start_point = (x, y)
+                            path_string += "M {},{}".format(x, y)
+                        else:
+                            end_point = (x, y)
+                            if pix_distance(start_point, end_point) >= min_movement:
+                                path_string += " L {},{}".format(end_point[0], end_point[1])
+                                start_point = (x, y)
+                                end_point = None
+
+                    else:
+                        if path_string:
+                            self.paths.append(Path(path_string=path_string, zoom=1))
+                        start_point = None
+                        end_point = None
+                        path_string = ""
+
+        return output
+
     def plot(self):
         def find_serial_port():
             for p in os.listdir("/dev/"):
@@ -218,11 +273,16 @@ class SVG:
         # commands.append("M0.0,{}.0".format(self.bed_size[1]))
 
         MAX_BUFFER_SIZE = 300
-        messages = []
-        # for command in commands:
-        #     print("{}({});".format(command[0], command[1:]))
+        MAX_BUFFER_SIZE = 1000
+        messages = commands[0:2]
 
-        for command in tqdm(commands, desc="Printing"):
+        payload = "{};\r\n".format(";".join(messages))
+        ser.write(bytes(payload.encode()))
+        while not ser.readline() == b'ack\r\n':
+            pass
+
+        messages = []
+        for command in tqdm(commands[2:], desc="Printing"):
             if len("{};\r\n".format(";".join(messages + [command]))) >= MAX_BUFFER_SIZE:
                 payload = "{};\r\n".format(";".join(messages))
                 messages = [command]
