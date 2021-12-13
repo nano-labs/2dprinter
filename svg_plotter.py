@@ -18,8 +18,8 @@ MAX_BED = (MAX_BED_PIXELS[0] / PIXELS_PER_MM, MAX_BED_PIXELS[1] / PIXELS_PER_MM)
 
 
 class SVG:
-    # def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(230), Decimal(181))):
-    def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(200), Decimal(150))):
+    def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(230), Decimal(181))):
+        # def __init__(self, svg_file, infill_file=None, bed_size=(Decimal(20), Decimal(18))):
         self.bed_size = (bed_size[0] * PIXELS_PER_MM, bed_size[1] * PIXELS_PER_MM)
         assert self.bed_size[0] <= MAX_BED_PIXELS[0], (
             "Bed_size cannot be bigger than %smm x %smm" % MAX_BED
@@ -60,13 +60,13 @@ class SVG:
         output = Image.new("RGB", size, color=(255, 255, 255))
         for p in tqdm(self.paths, "Cutting"):
             output = p.draw(output)
-        base_infill_map = self.make_infill_map(output, self.svg_file)
-        shade_infill_map = self.make_infill_map(output, self.infill_file)
+        # base_infill_map = self.make_infill_map(output, self.svg_file)
+        # shade_infill_map = self.make_infill_map(output, self.infill_file)
 
         output = Image.new("RGB", size, color=(255, 255, 255))
-        # output = self.add_infill(base_infill_map, output, density=10)
+        # output = self.add_diagonal_infill(base_infill_map, output, step_mm=1.2)
         # output = self.add_vertical_infill(base_infill_map, output, step_mm=1.2)
-        output = self.add_nautilus_infill(base_infill_map, output, step_mm=1.0)
+        # output = self.add_nautilus_infill(base_infill_map, output, step_mm=1.0)
         # output = self.add_diagonal_infill(shade_infill_map, output, step_mm=1.2, rotate=True)
         for p in tqdm(self.paths, desc="Drawing"):
             output = p.draw(output)
@@ -84,7 +84,14 @@ class SVG:
                         min_pixel = (min(x, min_pixel[0]), min(y, min_pixel[1]))
                         max_pixel = (max(x, max_pixel[0]), y)
 
-            return im.crop((min_pixel[0], min_pixel[1], max_pixel[0] + 2, max_pixel[1] + 2,))
+            return im.crop(
+                (
+                    min_pixel[0],
+                    min_pixel[1],
+                    max_pixel[0] + 2,
+                    max_pixel[1] + 2,
+                )
+            )
 
         infill_file = infill_file or self.infill_file
         with open(infill_file, "r") as svg:
@@ -235,6 +242,24 @@ class SVG:
 
         return output
 
+    # def add_radial_infill(self, infill_map, output, step_mm=1.0):
+    #     def pix_distance(a, b):
+    #         catx = abs(a[0] - b[0])
+    #         caty = abs(a[1] - b[1])
+    #         return int(sqrt(catx * catx + caty * caty))
+
+    #     im = infill_map
+    #     step = Decimal(step_mm) * PIXELS_PER_MM
+    #     center = (int(im.size[0] / 2), int(im.size[1] / 2))
+    #     max_radius = Decimal(sqrt(im.size[0] * im.size[0] + im.size[1] * im.size[1]))
+    #     grad_to_rad = 0.01745329252
+
+    #     for angle in range(36000):
+    #         angle = Decimal((angle / 100.0) * grad_to_rad)
+    #         for radius in range(int(max_radius)):
+    #             x = int(center[0] + (radius * Decimal(cos(angle))))
+    #             y = int(center[1] + (radius * Decimal(sin(angle))))
+
     def plot(self):
         def find_serial_port():
             for p in os.listdir("/dev/"):
@@ -263,6 +288,7 @@ class SVG:
             # output = p.plot(ser)
             commands.extend(p.commands)
 
+        commands.append("M{:.1f},{:.1f}".format(self.max_x * 1.1, self.max_y))
         # Com Borda
         # commands.append("M0.0,{}.0".format(self.max_y))
         # commands.append("L0.0,0.0")
@@ -272,8 +298,8 @@ class SVG:
         # Sem borda
         # commands.append("M0.0,{}.0".format(self.bed_size[1]))
 
-        MAX_BUFFER_SIZE = 300
         MAX_BUFFER_SIZE = 1000
+        # MAX_BUFFER_SIZE = 1000
         messages = commands[0:2]
 
         payload = "{};\r\n".format(";".join(messages))

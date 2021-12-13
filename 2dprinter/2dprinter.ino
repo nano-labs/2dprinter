@@ -93,7 +93,7 @@ void stepper_x_step(int steps) {
 }
 void stepper_y_step(int steps) {
   if (steps > 0) {
-    digitalWrite(stepYDir, HIGH);
+    digitalWrite(stepYDir, LOW);
     for(int y = 0; y < steps; y++) {
       digitalWrite(stepYPin,HIGH); 
       delayMicroseconds(stepperDelay); 
@@ -101,7 +101,7 @@ void stepper_y_step(int steps) {
       delayMicroseconds(stepperDelay); 
     }
   } else {
-    digitalWrite(stepYDir, LOW);
+    digitalWrite(stepYDir, HIGH);
     for(int y = 0; y > steps; y--) {
       digitalWrite(stepYPin,HIGH); 
       delayMicroseconds(stepperDelay); 
@@ -119,15 +119,15 @@ void go_home() {
   goto_xy(pos_x + 200, pos_y);
   pos_x = 0.0;
   while (digitalRead(switch_y) == HIGH) {
-    goto_xy(pos_x, pos_y - 1);
+    goto_xy(pos_x, pos_y + 1);
   }
-  goto_xy(pos_x, pos_y + 200);
-  pos_y = 0.0;
+  goto_xy(pos_x, pos_y - 200);
+  pos_y = maxY;
 }
 
 void reset() {
   pos_x = 0.0;
-  pos_y = 0.0;
+  pos_y = maxY;
   start_x = -1;
   start_y = -1;
   x0 = 0;
@@ -146,12 +146,12 @@ void reset() {
 }
 
 void start_drawing() {
-  servo_z.write(70);
-  delay(300);
+  servo_z.write(0);
+  delay(500);
 }
 void stop_drawing() {
   servo_z.write(180);
-  delay(300);
+  delay(500);
 }
 int goto_xy(int pix_x, int pix_y) {
   float new_x = pix_x;
