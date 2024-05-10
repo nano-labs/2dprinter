@@ -1,0 +1,5 @@
+CairoSVG==2.7.1
+image==1.5.33
+serial==0.0.97
+svg.path==6.3
+tqdm==4.66.4

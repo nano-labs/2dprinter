@@ -11,6 +11,7 @@ from xml.dom import minidom
 import serial
 from tqdm import tqdm
 from cairosvg import svg2png
+from svg.path import Arc
 
 PIXELS_PER_MM = Decimal(40)
 MAX_BED_PIXELS = (10840, 7320)
@@ -31,14 +32,63 @@ class SVG:
         self.infill_file = infill_file or svg_file
         doc = minidom.parse(svg_file)
         path_strings = [path.getAttribute('d') for path in doc.getElementsByTagName('path')]
+        # ellipses = [
+        #     {
+        #         "cx": ellipse.getAttribute('cx'),
+        #         "cy": ellipse.getAttribute('cy'),
+        #         "rx": ellipse.getAttribute('rx'),
+        #         "ry": ellipse.getAttribute('ry'),
+        #     }
+        #     for ellipse in doc.getElementsByTagName('ellipse')
+        # ]
         self.paths = []
         zoom = Decimal(1.0)
+        circles = [
+            Circle(**{
+                "center_x": Decimal(circle.getAttribute('cx')),
+                "center_y": Decimal(circle.getAttribute('cy')),
+                "radius": Decimal(circle.getAttribute('r')),
+                "zoom": zoom
+            })
+            for circle in doc.getElementsByTagName('circle')
+        ]
+        ellipses = [
+            Circle(**{
+                "center_x": Decimal(ellipse.getAttribute('cx')),
+                "center_y": Decimal(ellipse.getAttribute('cy')),
+                "radius": Decimal(ellipse.getAttribute('rx')),
+                "zoom": zoom
+            })
+            for ellipse in doc.getElementsByTagName('ellipse')
+        ]
+        self.paths.extend(circles)
+        self.paths.extend(ellipses)
         for path_string in tqdm(path_strings, desc="Scalling"):
             p = Path(path_string, zoom=zoom)
             self.paths.append(p)
         self.size = self.get_size()
         zoom = min(self.bed_size[0] / self.size[0], self.bed_size[1] / self.size[1])
         self.paths = []
+        circles = [
+            Circle(**{
+                "center_x": Decimal(circle.getAttribute('cx')),
+                "center_y": Decimal(circle.getAttribute('cy')),
+                "radius": Decimal(circle.getAttribute('r')),
+                "zoom": zoom
+            })
+            for circle in doc.getElementsByTagName('circle')
+        ]
+        ellipses = [
+            Circle(**{
+                "center_x": Decimal(ellipse.getAttribute('cx')),
+                "center_y": Decimal(ellipse.getAttribute('cy')),
+                "radius": Decimal(ellipse.getAttribute('rx')),
+                "zoom": zoom
+            })
+            for ellipse in doc.getElementsByTagName('ellipse')
+        ]
+        self.paths.extend(circles)
+        self.paths.extend(ellipses)
         for path_string in tqdm(path_strings, desc="Base paths"):
             p = Path(path_string, zoom=zoom)
             self.paths.append(p)
@@ -348,13 +398,13 @@ class Path:
                 args = args[1:]
             args = args.replace("  ", " ").replace(" ", ",")
             args = [Decimal(f) for f in args.split(",")]
-            args = [a * self.zoom for a in args]
+            zoomed_args = [a * self.zoom for a in args]
             # if command == "M":
             #     return self.M(*args)
             if command == "M":
                 pen_up = True
                 subargs = []
-                for a in args:
+                for a in zoomed_args:
                     subargs.append(a)
                     if len(subargs) == 2:
                         if pen_up:
@@ -367,7 +417,7 @@ class Path:
             elif command == "m":
                 pen_up = True
                 subargs = []
-                for a in args:
+                for a in zoomed_args:
                     subargs.append(a)
                     if len(subargs) == 2:
                         if pen_up:
@@ -378,28 +428,28 @@ class Path:
                         subargs = []
 
             elif command == "h":
-                for a in args:
+                for a in zoomed_args:
                     self.h(a)
             elif command == "H":
-                for a in args:
+                for a in zoomed_args:
                     self.H(a)
             elif command == "v":
-                for a in args:
+                for a in zoomed_args:
                     self.v(a)
             elif command == "V":
-                for a in args:
+                for a in zoomed_args:
                     self.V(a)
 
             elif command == "L":
                 subargs = []
-                for a in args:
+                for a in zoomed_args:
                     subargs.append(a)
                     if len(subargs) == 2:
                         self.L(*subargs)
                         subargs = []
             elif command == "l":
                 subargs = []
-                for a in args:
+                for a in zoomed_args:
                     subargs.append(a)
                     if len(subargs) == 2:
                         self.l(*subargs)
@@ -407,24 +457,49 @@ class Path:
 
             elif command == "C":
                 subargs = []
-                for a in args:
+                for a in zoomed_args:
                     subargs.append(a)
                     if len(subargs) == 6:
                         self.C(*subargs)
                         subargs = []
             elif command == "c":
                 subargs = []
-                for a in args:
+                for a in zoomed_args:
                     subargs.append(a)
                     if len(subargs) == 6:
                         self.c(*subargs)
                         subargs = []
+
+            elif command == "A":
+                subargs = []
+                for a in args:
+                    subargs.append(a)
+                    if len(subargs) == 7:
+                        (
+                            radius_x,
+                            radius_y,
+                            rotate,
+                            large_arc_flag,
+                            sweep_flag,
+                            end_x,
+                            end_y,
+                        ) = subargs
+                        self.A(
+                            radius_x * self.zoom,
+                            radius_y * self.zoom,
+                            rotate,
+                            bool(large_arc_flag),
+                            bool(sweep_flag),
+                            end_x * self.zoom,
+                            end_y * self.zoom,
+                        )
+                        subargs = []
             else:
-                print(command)
+                print(command, command_string)
 
         command = ""
         for l in d:
-            if l in "MmLlHhVvCcZzq":
+            if l in "AMmLlHhVvCcZzq":
                 parse_command(command)
                 command = l
             else:
@@ -454,11 +529,24 @@ class Path:
             )
             self._line(self.pos_x, self.pos_y, x, y)
 
+    def A(self, radius_x, radius_y, rotate, large_arc_flag, sweep_flag, end_x, end_y):
+        arc = Arc(
+            start=complex(self.pos_x, self.pos_y),
+            radius=complex(radius_x, radius_y),
+            rotation=rotate,
+            arc=large_arc_flag,
+            sweep=sweep_flag,
+            end=complex(end_x, end_y),
+        )
+        for i in range(100):
+            point = arc.point(i / 100.0)
+            self.L(Decimal(point.real), Decimal(point.imag))
+        pass
+
     def m(self, x1, y1):
         return self.M(self.pos_x + x1, self.pos_y + y1)
 
     def M(self, x0, y0):
-
         if not self.start:
             self.start = (x0, y0)
         self.goto_xy(x0, y0)
@@ -562,6 +650,29 @@ class Path:
             output.putpixel((int(x), int(y)), color)
 
         return output
+
+
+class Circle(Path):
+    def __init__(self, center_x, center_y, radius, zoom):
+        self._all = []
+        self.center_x = center_x * zoom
+        self.center_y = center_y * zoom
+        self.radius = radius * zoom
+        self.zoom = zoom
+        self.pos_x = self.center_x
+        self.pos_y = self.center_y - self.radius
+        self.angle = 0.0
+        self.start = None
+        self.commands = []
+        self.to_bitmap()
+
+    def to_bitmap(self):
+        self.M(self.pos_x, self.pos_y)
+        for a in range(360):
+            rad = a * (3.14/180)
+            x = self.center_x + (Decimal(sin(rad)) * self.radius)
+            y = self.center_y - (Decimal(cos(rad)) * self.radius)
+            self.L(Decimal(x), Decimal(y))
 
 
 if __name__ == "__main__":
